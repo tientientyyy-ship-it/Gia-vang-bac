@@ -7,12 +7,16 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from dotenv import load_dotenv
 
-# Load env
+# Load env + DEBUG
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+print(f"🚀 TOKEN: {'OK' if TELEGRAM_TOKEN else '❌ MISSING!'}")
 
-# Logging
-logging.basicConfig(level=logging.INFO)
+# Logging cho Railway
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 class PriceBot:
@@ -32,13 +36,13 @@ class PriceBot:
 🇻🇳 VND: `{coin['vnd']:,.0f:,}`đ
 📈 24h: {change} `{coin['usd_24h_change']:+.1f}%`
 
-🕐 {datetime.now().strftime('%H:%M %d/%m') }"""
-        except:
+🕐 {datetime.now().strftime('%H:%M %d/%m')}"""
+        except Exception as e:
+            logger.error(f"Crypto {name} error: {e}")
             return f"❌ Lỗi {name}"
     
     def get_gold(self):
         try:
-            # API ổn định nhất
             data = requests.get("https://gjapi.apis.gjlab.vn/gold-price", timeout=10).json()['data']
             buy, sell = data['sjc_buy'], data['sjc_sell']
             diff = sell - buy
@@ -48,14 +52,10 @@ class PriceBot:
 💎 Bán: `{sell:,.0f}`đ
 📊 Chênh: `{diff:,.0f}`đ
 
-🕐 {datetime.now().strftime('%H:%M %d/%m') }"""
+🕐 {datetime.now().strftime('%H:%M %d/%m')}"""
         except:
             return """🥇 **VÀNG SJC**
-
-💰 Mua: Đang cập nhật
-💎 Bán: Đang cập nhật
-
-🔄 Thử lại..."""
+🔄 Đang cập nhật..."""
     
     def get_silver(self):
         try:
@@ -66,9 +66,9 @@ class PriceBot:
 💵 USD: `${data['price']:,.2f}`
 🇻🇳 VND: `{vnd:,.0f:,}`đ
 
-🕐 {datetime.now().strftime('%H:%M %d/%m') }"""
+🕐 {datetime.now().strftime('%H:%M %d/%m')}"""
         except:
-            return "🥈 **BẠC** Đang cập nhật..."
+            return "🥈 **BẠC** 🔄 Đang cập nhật..."
     
     def menu(self):
         return InlineKeyboardMarkup([
@@ -79,6 +79,7 @@ class PriceBot:
         ])
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logger.info("User started bot")
         await update.message.reply_text(
             "🚀 **GIÁ VÀNG + CRYPTO**\n\n👇 Chọn giá:",
             reply_markup=self.menu(),
@@ -88,15 +89,15 @@ class PriceBot:
     async def text_msg(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = update.message.text.lower()
         if 'vàng' in text or 'sjc' in text:
-            await update.message.reply_text(self.get_gold(), parse_mode='Markdown')
+            await update.message.reply_text(self.get_gold(), parse_mode='Markdown', reply_markup=self.menu())
         elif 'bạc' in text:
-            await update.message.reply_text(self.get_silver(), parse_mode='Markdown')
+            await update.message.reply_text(self.get_silver(), parse_mode='Markdown', reply_markup=self.menu())
         elif 'btc' in text:
-            await update.message.reply_text(self.get_crypto('bitcoin', 'BTC'), parse_mode='Markdown')
+            await update.message.reply_text(self.get_crypto('bitcoin', 'BTC'), parse_mode='Markdown', reply_markup=self.menu())
         elif 'eth' in text:
-            await update.message.reply_text(self.get_crypto('ethereum', 'ETH'), parse_mode='Markdown')
+            await update.message.reply_text(self.get_crypto('ethereum', 'ETH'), parse_mode='Markdown', reply_markup=self.menu())
         elif 'bnb' in text:
-            await update.message.reply_text(self.get_crypto('binancecoin', 'BNB'), parse_mode='Markdown')
+            await update.message.reply_text(self.get_crypto('binancecoin', 'BNB'), parse_mode='Markdown', reply_markup=self.menu())
         else:
             await update.message.reply_text(
                 "🔍 **Gõ:** `vàng` `btc` `eth` `bnb` `bạc`\n\nHoặc nhấn 👇",
@@ -108,18 +109,21 @@ class PriceBot:
         query = update.callback_query
         await query.answer()
         
+        text = ""
         if query.data == "menu":
-            await query.edit_message_text("📊 **MENU GIÁ**\n👇 Chọn:", reply_markup=self.menu(), parse_mode='Markdown')
+            text = "📊 **MENU GIÁ**\n👇 Chọn:"
         elif query.data == "btc":
-            await query.edit_message_text(self.get_crypto('bitcoin', 'BTC'), reply_markup=self.menu(), parse_mode='Markdown')
+            text = self.get_crypto('bitcoin', 'BTC')
         elif query.data == "eth":
-            await query.edit_message_text(self.get_crypto('ethereum', 'ETH'), reply_markup=self.menu(), parse_mode='Markdown')
+            text = self.get_crypto('ethereum', 'ETH')
         elif query.data == "bnb":
-            await query.edit_message_text(self.get_crypto('binancecoin', 'BNB'), reply_markup=self.menu(), parse_mode='Markdown')
+            text = self.get_crypto('binancecoin', 'BNB')
         elif query.data == "gold":
-            await query.edit_message_text(self.get_gold(), reply_markup=self.menu(), parse_mode='Markdown')
+            text = self.get_gold()
         elif query.data == "silver":
-            await query.edit_message_text(self.get_silver(), reply_markup=self.menu(), parse_mode='Markdown')
+            text = self.get_silver()
+        
+        await query.edit_message_text(text, reply_markup=self.menu(), parse_mode='Markdown')
     
     def setup(self, app):
         app.add_handler(CommandHandler("start", self.start))
@@ -128,16 +132,17 @@ class PriceBot:
     
     async def run_bot(self):
         if not TELEGRAM_TOKEN:
-            logger.error("❌ TELEGRAM_BOT_TOKEN missing!")
+            logger.error("❌ TELEGRAM_BOT_TOKEN missing in env!")
             return
         
         self.app = Application.builder().token(TELEGRAM_TOKEN).build()
         self.setup(self.app)
         
-        logger.info("🤖 Bot starting...")
+        logger.info("🤖 Bot starting on Railway...")
+        print("🚀 Bot live 24/24!")
         await self.app.run_polling(drop_pending_updates=True)
 
-# RUN
+# RAILWAY READY
 async def main():
     bot = PriceBot()
     await bot.run_bot()
