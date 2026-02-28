@@ -7,173 +7,140 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from dotenv import load_dotenv
 
+# Load env
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# Logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class StablePriceBot:
+class PriceBot:
     def __init__(self):
-        self.app = Application.builder().token(TELEGRAM_TOKEN).build()
-        self.setup_handlers()
+        self.app = None
     
-    def get_crypto_price(self, coin_id, coin_name):
-        """BTC/ETH/BNB: USD + VND"""
+    def get_crypto(self, coin_id, name):
         try:
             url = "https://api.coingecko.com/api/v3/simple/price"
             params = {'ids': coin_id, 'vs_currencies': 'usd,vnd', 'include_24hr_change': 'true'}
-            response = requests.get(url, params=params, timeout=10)
-            data = response.json()
+            data = requests.get(url, params=params, timeout=10).json()
             coin = data[coin_id]
-            
-            change_emoji = "🟢" if coin['usd_24h_change'] > 0 else "🔴"
-            return f"""💎 **{coin_name} ({coin_id.upper()})**
+            change = "🟢" if coin['usd_24h_change'] > 0 else "🔴"
+            return f"""💎 **{name}**
 
-💵 *USD:* `${coin['usd']:,.2f}`
-🇻🇳 *VND:* `{coin['vnd']:,.0f:,}`đ
-📈 *24h:* {change_emoji} `{coin['usd_24h_change']:+.2f}%`
+💵 USD: `${coin['usd']:,.0f}`
+🇻🇳 VND: `{coin['vnd']:,.0f:,}`đ
+📈 24h: {change} `{coin['usd_24h_change']:+.1f}%`
 
-🕐 *{datetime.now().strftime('%H:%M %d/%m/%Y')}*"""
-        except Exception as e:
-            logger.error(f"Crypto error {coin_id}: {e}")
-            return f"❌ Lỗi lấy giá {coin_name}"
+🕐 {datetime.now().strftime('%H:%M %d/%m') }"""
+        except:
+            return f"❌ Lỗi {name}"
     
-    def get_gold_sjc(self):
-        """VÀNG SJC: Mua/Bán - 3 API backup"""
-        apis = [
-            "https://gjapi.apis.gjlab.vn/gold-price",
-            "https://api.giavanglive.com/v1/price/sjc",
-            "https://sjc.vn/webservice/SJCPrice.asmx/GetLatestPrice"
-        ]
-        
-        for api_url in apis:
-            try:
-                if "gjapi" in api_url:
-                    data = requests.get(api_url, timeout=10).json()['data']
-                    buy = data['sjc_buy']
-                    sell = data['sjc_sell']
-                elif "giavanglive" in api_url:
-                    data = requests.get(api_url, timeout=10).json()
-                    buy = data['buy']
-                    sell = data['sell']
-                else:
-                    continue  # Skip
-                
-                diff = sell - buy
-                return f"""🥇 **VÀNG SJC**
-
-💰 *MUA VÀO:* `{buy:,.0f}`đ
-💎 *BÁN RA:* `{sell:,.0f}`đ  
-📊 *CHÊNH:* `{diff:,.0f}`đ (+{diff/buy*100:.1f}%)
-
-🏪 *Cập nhật realtime*
-🕐 *{datetime.now().strftime('%H:%M %d/%m/%Y')}*"""
-            except:
-                continue
-        
-        return """🥇 **VÀNG SJC** (OFFLINE)
-
-💰 MUA VÀO: Đang cập nhật...
-💎 BÁN RA: Đang cập nhật...
-
-🔄 Thử lại sau 1 phút"""
-    
-    def get_silver_price(self):
-        """BẠC XAG"""
+    def get_gold(self):
         try:
-            url = "https://api.metals.live/v1/spot/XAG"
-            data = requests.get(url, timeout=10).json()['data']['XAG']
+            # API ổn định nhất
+            data = requests.get("https://gjapi.apis.gjlab.vn/gold-price", timeout=10).json()['data']
+            buy, sell = data['sjc_buy'], data['sjc_sell']
+            diff = sell - buy
+            return f"""🥇 **VÀNG SJC**
+
+💰 Mua: `{buy:,.0f}`đ
+💎 Bán: `{sell:,.0f}`đ
+📊 Chênh: `{diff:,.0f}`đ
+
+🕐 {datetime.now().strftime('%H:%M %d/%m') }"""
+        except:
+            return """🥇 **VÀNG SJC**
+
+💰 Mua: Đang cập nhật
+💎 Bán: Đang cập nhật
+
+🔄 Thử lại..."""
+    
+    def get_silver(self):
+        try:
+            data = requests.get("https://api.metals.live/v1/spot/XAG", timeout=10).json()['data']['XAG']
             vnd = data['price'] * 25000
             return f"""🥈 **BẠC XAG**
 
-💵 *USD:* `${data['price']:,.2f}`
-🇻🇳 *VND:* `{vnd:,.0f:,}`đ (ước tính)
+💵 USD: `${data['price']:,.2f}`
+🇻🇳 VND: `{vnd:,.0f:,}`đ
 
-🌍 *Thị trường quốc tế*
-🕐 *{datetime.now().strftime('%H:%M %d/%m/%Y')}*"""
+🕐 {datetime.now().strftime('%H:%M %d/%m') }"""
         except:
-            return """🥈 **BẠC XAG** (OFFLINE)
-
-💵 USD: Đang cập nhật...
-🇻🇳 VND: Đang cập nhật..."""
+            return "🥈 **BẠC** Đang cập nhật..."
     
-    def create_menu(self):
+    def menu(self):
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🧡 BTC", callback_data="btc")],
             [InlineKeyboardButton("🔷 ETH", callback_data="eth"), InlineKeyboardButton("⚡ BNB", callback_data="bnb")],
             [InlineKeyboardButton("🥇 Vàng SJC", callback_data="gold"), InlineKeyboardButton("🥈 Bạc", callback_data="silver")],
-            [InlineKeyboardButton("📊 Tất cả", callback_data="all"), InlineKeyboardButton("🔄 Làm mới", callback_data="main")]
+            [InlineKeyboardButton("🔄 Menu", callback_data="menu")]
         ])
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
-            "🌟 **GIÁ VÀNG SJC + CRYPTO** 🌟\n\n👇 *Chọn loại giá cần xem*",
-            reply_markup=self.create_menu(),
+            "🚀 **GIÁ VÀNG + CRYPTO**\n\n👇 Chọn giá:",
+            reply_markup=self.menu(),
             parse_mode='Markdown'
         )
     
-    async def price(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text(
-            "💰 **CHỌN GIÁ** 💰\n\n👇 *Nhấn nút*",
-            reply_markup=self.create_menu(),
-            parse_mode='Markdown'
-        )
-    
-    async def text_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def text_msg(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = update.message.text.lower()
         if 'vàng' in text or 'sjc' in text:
-            await update.message.reply_text(self.get_gold_sjc(), parse_mode='Markdown')
+            await update.message.reply_text(self.get_gold(), parse_mode='Markdown')
         elif 'bạc' in text:
-            await update.message.reply_text(self.get_silver_price(), parse_mode='Markdown')
+            await update.message.reply_text(self.get_silver(), parse_mode='Markdown')
         elif 'btc' in text:
-            await update.message.reply_text(self.get_crypto_price('bitcoin', 'Bitcoin'), parse_mode='Markdown')
+            await update.message.reply_text(self.get_crypto('bitcoin', 'BTC'), parse_mode='Markdown')
         elif 'eth' in text:
-            await update.message.reply_text(self.get_crypto_price('ethereum', 'Ethereum'), parse_mode='Markdown')
+            await update.message.reply_text(self.get_crypto('ethereum', 'ETH'), parse_mode='Markdown')
         elif 'bnb' in text:
-            await update.message.reply_text(self.get_crypto_price('binancecoin', 'BNB'), parse_mode='Markdown')
+            await update.message.reply_text(self.get_crypto('binancecoin', 'BNB'), parse_mode='Markdown')
         else:
             await update.message.reply_text(
-                "🔍 **TÌM KIẾM GIÁ**\n\n"
-                "`vàng` `sjc` → Vàng SJC\n"
-                "`btc` → Bitcoin\n"
-                "`eth` → Ethereum\n"
-                "`bnb` → BNB\n"
-                "`bạc` → Silver\n\n"
-                "Hoặc nhấn nút 👇",
-                reply_markup=self.create_menu(),
+                "🔍 **Gõ:** `vàng` `btc` `eth` `bnb` `bạc`\n\nHoặc nhấn 👇",
+                reply_markup=self.menu(),
                 parse_mode='Markdown'
             )
     
-    async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
         
-        data = query.data
-        if data == "main" or data == "all":
-            msg = "📊 **MENU GIÁ** 📊\n\n👇 *Chọn tài sản*"
-            await query.edit_message_text(msg, reply_markup=self.create_menu(), parse_mode='Markdown')
-        elif data == "btc":
-            await query.edit_message_text(self.get_crypto_price('bitcoin', 'Bitcoin'), reply_markup=self.create_menu(), parse_mode='Markdown')
-        elif data == "eth":
-            await query.edit_message_text(self.get_crypto_price('ethereum', 'Ethereum'), reply_markup=self.create_menu(), parse_mode='Markdown')
-        elif data == "bnb":
-            await query.edit_message_text(self.get_crypto_price('binancecoin', 'BNB'), reply_markup=self.create_menu(), parse_mode='Markdown')
-        elif data == "gold":
-            await query.edit_message_text(self.get_gold_sjc(), reply_markup=self.create_menu(), parse_mode='Markdown')
-        elif data == "silver":
-            await query.edit_message_text(self.get_silver_price(), reply_markup=self.create_menu(), parse_mode='Markdown')
+        if query.data == "menu":
+            await query.edit_message_text("📊 **MENU GIÁ**\n👇 Chọn:", reply_markup=self.menu(), parse_mode='Markdown')
+        elif query.data == "btc":
+            await query.edit_message_text(self.get_crypto('bitcoin', 'BTC'), reply_markup=self.menu(), parse_mode='Markdown')
+        elif query.data == "eth":
+            await query.edit_message_text(self.get_crypto('ethereum', 'ETH'), reply_markup=self.menu(), parse_mode='Markdown')
+        elif query.data == "bnb":
+            await query.edit_message_text(self.get_crypto('binancecoin', 'BNB'), reply_markup=self.menu(), parse_mode='Markdown')
+        elif query.data == "gold":
+            await query.edit_message_text(self.get_gold(), reply_markup=self.menu(), parse_mode='Markdown')
+        elif query.data == "silver":
+            await query.edit_message_text(self.get_silver(), reply_markup=self.menu(), parse_mode='Markdown')
     
-    def setup_handlers(self):
-        self.app.add_handler(CommandHandler("start", self.start))
-        self.app.add_handler(CommandHandler("price", self.price))
-        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text_handler))
-        self.app.add_handler(CallbackQueryHandler(self.button_handler))
+    def setup(self, app):
+        app.add_handler(CommandHandler("start", self.start))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text_msg))
+        app.add_handler(CallbackQueryHandler(self.button))
     
-    async def run(self):
-        logger.info("🤖 Starting Stable Bot...")
+    async def run_bot(self):
+        if not TELEGRAM_TOKEN:
+            logger.error("❌ TELEGRAM_BOT_TOKEN missing!")
+            return
+        
+        self.app = Application.builder().token(TELEGRAM_TOKEN).build()
+        self.setup(self.app)
+        
+        logger.info("🤖 Bot starting...")
         await self.app.run_polling(drop_pending_updates=True)
 
+# RUN
+async def main():
+    bot = PriceBot()
+    await bot.run_bot()
+
 if __name__ == "__main__":
-    app = StablePriceBot()
-    asyncio.run(app.run())
+    asyncio.run(main())
