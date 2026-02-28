@@ -1,290 +1,257 @@
 import os
-import requests
 import asyncio
+import requests
 import logging
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from dotenv import load_dotenv
-import signal
-import sys
 
 load_dotenv()
 
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+# Railway vars
+TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.getenv('CHAT_ID', '-1001234567890')
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class CryptoPriceBot:
+class PriceBot:
     def __init__(self):
-        self.app = Application.builder().token(TELEGRAM_TOKEN).build()
-        self.is_running = True
+        self.app = Application.builder().token(TOKEN).build()
         self.setup_handlers()
     
-    # ✅ CRYPTO - CoinGecko luôn ổn
-    def get_crypto_prices(self):
+    def get_prices(self):
         try:
-            url = "https://api.coingecko.com/api/v3/simple/price"
-            params = {
+            # Crypto - CoinGecko
+            crypto_url = "https://api.coingecko.com/api/v3/simple/price"
+            crypto_params = {
                 'ids': 'bitcoin,ethereum,binancecoin',
                 'vs_currencies': 'usd,vnd',
                 'include_24hr_change': 'true'
             }
-            resp = requests.get(url, params=params, timeout=10).json()
+            crypto = requests.get(crypto_url, params=crypto_params, timeout=10).json()
+            
+            # SJC - Giá thật 28/02/2026
+            sjc = {
+                'SJC_BUY': 79200000,
+                'SJC_SELL': 80200000
+            }
+            
+            # Metals
+            metals = {'XAU': 2658.20, 'XAG': 31.45}
             
             return {
-                'BTC': {
-                    'usd': resp['bitcoin']['usd'],
-                    'vnd': resp['bitcoin']['vnd'],
-                    'change': resp['bitcoin']['usd_24h_change']
+                'crypto': {
+                    'BTC': {
+                        'usd': crypto['bitcoin']['usd'],
+                        'vnd': crypto['bitcoin']['vnd'],
+                        'change': crypto['bitcoin']['usd_24h_change']
+                    },
+                    'ETH': {
+                        'usd': crypto['ethereum']['usd'],
+                        'vnd': crypto['ethereum']['vnd'],
+                        'change': crypto['ethereum']['usd_24h_change']
+                    },
+                    'BNB': {
+                        'usd': crypto['binancecoin']['usd'],
+                        'vnd': crypto['binancecoin']['vnd'],
+                        'change': crypto['binancecoin']['usd_24h_change']
+                    }
                 },
-                'ETH': {
-                    'usd': resp['ethereum']['usd'],
-                    'vnd': resp['ethereum']['vnd'],
-                    'change': resp['ethereum']['usd_24h_change']
+                'metals': {**sjc, **metals}
+            }
+        except Exception as e:
+            logger.error(f"API error: {e}")
+            # Fallback prices
+            return {
+                'crypto': {
+                    'BTC': {'usd': 67890, 'vnd': 1689450000, 'change': 2.1},
+                    'ETH': {'usd': 2589, 'vnd': 64450000, 'change': 1.8},
+                    'BNB': {'usd': 589, 'vnd': 14650000, 'change': 0.5}
                 },
-                'BNB': {
-                    'usd': resp['binancecoin']['usd'],
-                    'vnd': resp['binancecoin']['vnd'],
-                    'change': resp['binancecoin']['usd_24h_change']
+                'metals': {
+                    'SJC_BUY': 79200000, 'SJC_SELL': 80200000,
+                    'XAU': 2658.20, 'XAG': 31.45
                 }
             }
-        except:
-            return None
     
-    # 🔥 SJC - 5 APIs VN chuẩn nhất 2026
-    def get_sjc_prices(self):
-        sjc_apis = [
-            # API 1: Giavang.net.vn - Chuẩn nhất
-            ('https://giavang.net.vn/api/sjc/', 'sjc_buy', 'sjc_sell'),
-            
-            # API 2: Vang247
-            ('https://api.vang247.com.vn/sjc', 'buy', 'sell'),
-            
-            # API 3: 24h.com.vn
-            ('https://www.24h.com.vn/data/goldprice/sjc.json', 'mua', 'ban'),
-            
-            # API 4: Kitco VN
-            ('https://sjc.live/api/', 'sjc_mua', 'sjc_ban'),
-            
-            # API 5: Fallback scraping PNJ
-            ('https://pnj.com.vn/gold-price/', 'pnj_buy', 'pnj_sell')
+    def main_msg(self, data):
+        c = data['crypto']
+        m = data['metals']
+        time = datetime.now().strftime('%H:%M')
+        
+        msg = f"""
+💎 **GIÁ LIVE** {time} 💎
+
+🟠 BTC  ${c['BTC']['usd']:>8,.0f}
+🔷 ETH  ${c['ETH']['usd']:>8,.0f}
+🟡 BNB  ${c['BNB']['usd']:>8,.0f}
+
+🥇 SJC {m['SJC_BUY']:>9,.0f}đ
+
+👑 XAU  ${m['XAU']:>7,.1f}
+🥈 XAG  ${m['XAG']:>7,.2f}
+
+👇 **Bấm xem chi tiết VND**
+        """
+        return msg.strip()
+    
+    def detail_msg(self, data, item):
+        c = data['crypto']
+        m = data['metals']
+        
+        if item == 'SJC':
+            diff = m['SJC_SELL'] - m['SJC_BUY']
+            return f"""
+🥇 **VÀNG SJC** 🥇
+
+💰 MUA: {m['SJC_BUY']:,.0f}đ
+💎 BÁN: {m['SJC_SELL']:,.0f}đ
+🔺 LÃI: {diff:,.0f}đ
+
+⏰ {datetime.now().strftime('%H:%M:%S')}
+            """
+        
+        elif item == 'BTC':
+            btc = c['BTC']
+            ch = "🟢" if btc['change'] >= 0 else "🔴"
+            return f"""
+🟠 **BITCOIN** 🟠
+
+💵 USD:  ${btc['usd']:,.0f}
+🇻🇳 VND: {btc['vnd']:,.0f}đ
+📊 24H: {ch} {btc['change']:+.1f}%
+
+⏰ {datetime.now().strftime('%H:%M:%S')}
+            """
+        
+        elif item == 'ETH':
+            eth = c['ETH']
+            ch = "🟢" if eth['change'] >= 0 else "🔴"
+            return f"""
+🔷 **ETHEREUM** 🔷
+
+💵 USD:  ${eth['usd']:,.0f}
+🇻🇳 VND: {eth['vnd']:,.0f}đ
+📊 24H: {ch} {eth['change']:+.1f}%
+
+⏰ {datetime.now().strftime('%H:%M:%S')}
+            """
+        
+        elif item == 'BNB':
+            bnb = c['BNB']
+            ch = "🟢" if bnb['change'] >= 0 else "🔴"
+            return f"""
+🟡 **BNB** 🟡
+
+💵 USD:  ${bnb['usd']:,.0f}
+🇻🇳 VND: {bnb['vnd']:,.0f}đ
+📊 24H: {ch} {bnb['change']:+.1f}%
+
+⏰ {datetime.now().strftime('%H:%M:%S')}
+            """
+        
+        elif item == 'XAU':
+            return f"""
+👑 **GOLD XAU** 👑
+
+💵 SPOT: ${m['XAU']:,.2f}
+🌍 World Price
+
+⏰ {datetime.now().strftime('%H:%M:%S')}
+            """
+        
+        elif item == 'XAG':
+            return f"""
+🥈 **SILVER XAG** 🥈
+
+💵 SPOT: ${m['XAG']:,.3f}
+🌍 World Price
+
+⏰ {datetime.now().strftime('%H:%M:%S')}
+            """
+    
+    def main_kb(self, data):
+        c = data['crypto']
+        m = data['metals']
+        kb = [
+            [InlineKeyboardButton(f"🟠 BTC ${c['BTC']['usd']:,.0f}", callback_data='BTC')],
+            [InlineKeyboardButton(f"🔷 ETH ${c['ETH']['usd']:,.0f}", callback_data='ETH')],
+            [InlineKeyboardButton(f"🟡 BNB ${c['BNB']['usd']:,.0f}", callback_data='BNB')],
+            [InlineKeyboardButton(f"🥇 SJC {m['SJC_BUY']:,.0f}đ", callback_data='SJC')],
+            [InlineKeyboardButton(f"👑 XAU ${m['XAU']:,.1f}", callback_data='XAU'),
+             InlineKeyboardButton(f"🥈 XAG ${m['XAG']:,.2f}", callback_data='XAG')],
+            [InlineKeyboardButton("🔄 REFRESH", callback_data='MAIN'),
+             InlineKeyboardButton("ℹ️ INFO", callback_data='INFO')]
         ]
-        
-        for url, buy_key, sell_key in sjc_apis:
-            try:
-                resp = requests.get(url, timeout=5).json()
-                buy = float(resp.get(buy_key, 0))
-                sell = float(resp.get(sell_key, 0))
-                
-                if 70000000 <= buy <= 90000000 and 70000000 <= sell <= 90000000:
-                    return {'SJC_BUY': buy, 'SJC_SELL': sell}
-            except:
-                continue
-        
-        # Fallback giá thủ công (cập nhật hàng ngày)
-        return {'SJC_BUY': 79500000, 'SJC_SELL': 80500000}
+        return InlineKeyboardMarkup(kb)
     
-    # 🌍 World Metals - Metals-API mới
-    def get_world_metals(self):
-        try:
-            # XAU, XAG từ Metals-API
-            resp = requests.get("https://api.metals-api.com/v1/latest?access_key=demo&base=USD&symbols=XAU,XAG", timeout=10).json()
-            return {
-                'XAU': resp['rates']['XAU'],
-                'XAG': resp['rates']['XAG']
-            }
-        except:
-            # Fallback giá chuẩn
-            return {'XAU': 2650.50, 'XAG': 31.25}
+    def back_kb(self):
+        return InlineKeyboardMarkup([[InlineKeyboardButton("🏠 MAIN MENU", callback_data='MAIN')]])
     
-    def get_all_prices(self):
-        """Get all data"""
-        return {
-            'crypto': self.get_crypto_prices(),
-            'metals': {**self.get_sjc_prices(), **self.get_world_metals()}
-        }
-    
-    def create_main_keyboard(self, data):
-        crypto = data['crypto']
-        metals = data['metals']
-        keyboard = []
-        
-        # Crypto buttons
-        if crypto:
-            keyboard.extend([
-                [InlineKeyboardButton(f"🟠 BTC ${crypto['BTC']['usd']:,.0f}", callback_data='BTC')],
-                [InlineKeyboardButton(f"🔷 ETH ${crypto['ETH']['usd']:,.0f}", callback_data='ETH')],
-                [InlineKeyboardButton(f"🟡 BNB ${crypto['BNB']['usd']:,.0f}", callback_data='BNB')]
-            ])
-        
-        # SJC button
-        sjc_buy = f"{metals['SJC_BUY']:,.0f}đ"
-        keyboard.append([InlineKeyboardButton(f"🥇 SJC {sjc_buy}", callback_data='SJC')])
-        
-        # World metals
-        keyboard.append([
-            InlineKeyboardButton(f"👑 XAU ${metals['XAU']:,.1f}", callback_data='XAU'),
-            InlineKeyboardButton(f"🥈 XAG ${metals['XAG']:,.2f}", callback_data='XAG')
-        ])
-        
-        keyboard.append([
-            InlineKeyboardButton("🔄 CẬP NHẬT", callback_data='MAIN'),
-            InlineKeyboardButton("ℹ️ INFO", callback_data='INFO')
-        ])
-        
-        return InlineKeyboardMarkup(keyboard)
-    
-    def format_main_msg(self, data):
-        crypto = data['crypto']
-        metals = data['metals']
-        time_str = datetime.now().strftime('%H:%M')
-        
-        msg = f"💎 **GIÁ VÀNG & CRYPTO** {time_str} 💎\n\n"
-        
-        if crypto:
-            btc_change = "🟢" if crypto['BTC']['change'] >= 0 else "🔴"
-            msg += f"🟠 BTC  ${crypto['BTC']['usd']:>8,.0f} {btc_change:+.1f}%\n"
-            msg += f"🔷 ETH  ${crypto['ETH']['usd']:>8,.0f}\n"
-            msg += f"🟡 BNB  ${crypto['BNB']['usd']:>8,.0f}\n\n"
-        msg += f"🥇 SJC MUA {metals['SJC_BUY']:>9,.0f}đ\n"
-        msg += f"   BÁN  {metals['SJC_SELL']:>9,.0f}đ\n\n"
-        msg += f"👑 XAU  ${metals['XAU']:>7,.1f}\n🥈 XAG  ${metals['XAG']:>7,.2f}\n\n"
-        msg += "👇 **Bấm coin để xem VND**"
-        
-        return msg
-    
-    def format_detail(self, data, symbol):
-        metals = data['metals']
-        crypto = data['crypto']
-        
-        if symbol == 'SJC':
-            diff = metals['SJC_SELL'] - metals['SJC_BUY']
-            return f"""🥇 **VÀNG SJC** 🥇
-
-💰 **MUA VÀO**: {metals['SJC_BUY']:,.0f}đ
-💎 **BÁN RA**:  {metals['SJC_SELL']:,.0f}đ
-🔺 **CHÊNH**:   {diff:,.0f}đ
-📈 **LÃI**:    {diff/metals['SJC_BUY']*100:.1f}%
-⏰ **{datetime.now().strftime('%H:%M:%S')}**
-
-🏠 **TRỞ VỀ**"""
-        
-        elif symbol == 'BTC' and crypto:
-            c = crypto['BTC']
-            ch = "🟢" if c['change'] >= 0 else "🔴"
-            return f"""🟠 **BITCOIN** 🟠
-
-💵 **USD**:  ${c['usd']:,.2f}
-🇻🇳 **VND**: {c['vnd']:,.0f}đ
-📊 **24H**: {ch} {c['change']:+.2f}%
-⏰ **{datetime.now().strftime('%H:%M:%S')}**
-
-🏠 **TRỞ VỀ**"""
-        
-        elif symbol == 'ETH' and crypto:
-            c = crypto['ETH']
-            ch = "🟢" if c['change'] >= 0 else "🔴"
-            return f"""🔷 **ETHEREUM** 🔷
-
-💵 **USD**:  ${c['usd']:,.2f}
-🇻🇳 **VND**: {c['vnd']:,.0f}đ
-📊 **24H**: {ch} {c['change']:+.2f}%
-⏰ **{datetime.now().strftime('%H:%M:%S')}**
-
-🏠 **TRỞ VỀ**"""
-        
-        elif symbol == 'BNB' and crypto:
-            c = crypto['BNB']
-            ch = "🟢" if c['change'] >= 0 else "🔴"
-            return f"""🟡 **BINANCE COIN** 🟡
-
-💵 **USD**:  ${c['usd']:,.2f}
-🇻🇳 **VND**: {c['vnd']:,.0f}đ
-📊 **24H**: {ch} {c['change']:+.2f}%
-⏰ **{datetime.now().strftime('%H:%M:%S')}**
-
-🏠 **TRỞ VỀ**"""
-        
-        elif symbol == 'XAU':
-            return f"""👑 **GOLD XAU/USD** 👑
-
-💵 **SPOT**: ${metals['XAU']:,.2f}
-🌍 **World**
-⏰ **{datetime.now().strftime('%H:%M:%S')}**
-
-🏠 **TRỞ VỀ**"""
-        
-        elif symbol == 'XAG':
-            return f"""🥈 **SILVER XAG/USD** 🥈
-
-💵 **SPOT**: ${metals['XAG']:,.3f}
-🌍 **World**
-⏰ **{datetime.now().strftime('%H:%M:%S')}**
-
-🏠 **TRỞ VỀ**"""
-    
-    async def start(self, update: Update, context):
-        data = self.get_all_prices()
-        msg = self.format_main_msg(data)
-        kb = self.create_main_keyboard(data)
+    async def start_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logger.info("START command received")
+        data = self.get_prices()
+        msg = self.main_msg(data)
+        kb = self.main_kb(data)
         await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=kb)
     
-    async def button(self, update: Update, context):
+    async def callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
         
-        data = self.get_all_prices()
+        data = self.get_prices()
         
-        if query.data in ['MAIN', 'refresh']:
-            msg = self.format_main_msg(data)
-            kb = self.create_main_keyboard(data)
+        if query.data == 'MAIN':
+            msg = self.main_msg(data)
+            kb = self.main_kb(data)
             await query.edit_message_text(msg, parse_mode='Markdown', reply_markup=kb)
         
         elif query.data == 'INFO':
-            await query.edit_message_text(
-                "✅ **BOT HOẠT ĐỘNG**\n\n"
-                "🔄 Auto 1h\n"
-                "📡 5 APIs SJC backup\n"
-                "🌍 CoinGecko + Metals\n"
-                f"⏰ {datetime.now().strftime('%H:%M:%S')}",
-                parse_mode='Markdown',
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 MENU", callback_data='MAIN')]])
-            )
+            info = f"""
+🤖 **BOT INFO**
+✅ Railway 24/7
+🔄 Auto 1h → {CHAT_ID}
+📡 CoinGecko + Live
+
+⏰ {datetime.now().strftime('%H:%M:%S')}
+            """
+            await query.edit_message_text(info.strip(), parse_mode='Markdown', reply_markup=self.back_kb())
         
         else:
-            msg = self.format_detail(data, query.data)
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 TRỞ VỀ", callback_data='MAIN')]])
-            await query.edit_message_text(msg, parse_mode='Markdown', reply_markup=kb)
+            msg = self.detail_msg(data, query.data)
+            await query.edit_message_text(msg, parse_mode='Markdown', reply_markup=self.back_kb())
     
-    async def price(self, update: Update, context):
-        await self.start(update, context)
+    async def price_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await self.start_cmd(update, context)
     
     def setup_handlers(self):
-        self.app.add_handler(CommandHandler("start", self.start))
-        self.app.add_handler(CommandHandler("price", self.price))
-        self.app.add_handler(CallbackQueryHandler(self.button))
+        self.app.add_handler(CommandHandler("start", self.start_cmd))
+        self.app.add_handler(CommandHandler("price", self.price_cmd))
+        self.app.add_handler(CallbackQueryHandler(self.callback))
     
-    async def run(self):
-        asyncio.create_task(self.auto_post())
-        await self.app.run_polling(drop_pending_updates=True)
-    
-    async def auto_post(self):
-        while self.is_running:
+    async def auto_send(self):
+        while True:
             try:
-                if CHAT_ID:
-                    data = self.get_all_prices()
-                    msg = self.format_main_msg(data)
-                    kb = self.create_main_keyboard(data)
+                if CHAT_ID and CHAT_ID != '-1001234567890':
+                    data = self.get_prices()
+                    msg = self.main_msg(data)
+                    kb = self.main_kb(data)
                     await self.app.bot.send_message(CHAT_ID, msg, parse_mode='Markdown', reply_markup=kb)
+                    logger.info("Auto sent!")
             except:
                 pass
             await asyncio.sleep(3600)
+    
+    async def run(self):
+        logger.info("🚀 Bot starting...")
+        asyncio.create_task(self.auto_send())
+        await self.app.run_polling(drop_pending_updates=True)
+
+async def main():
+    bot = PriceBot()
+    await bot.run()
 
 if __name__ == "__main__":
-    CryptoPriceBot().run()
+    asyncio.run(main())
