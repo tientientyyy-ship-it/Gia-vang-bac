@@ -2,14 +2,13 @@ import os
 import requests
 import asyncio
 import logging
-import re
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from dotenv import load_dotenv
-from bs4 import BeautifulSoup
 import signal
 import sys
+import re
 
 load_dotenv()
 
@@ -24,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 class CryptoPriceBot:
-
     def __init__(self):
         if not TELEGRAM_TOKEN:
             logger.error("❌ TELEGRAM_BOT_TOKEN missing!")
@@ -44,8 +42,9 @@ class CryptoPriceBot:
                 'vs_currencies': 'usd,vnd',
                 'include_24hr_change': 'true'
             }
-            r = requests.get(url, params=params, timeout=10)
-            data = r.json()
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
 
             return {
                 'BTC': {
@@ -65,56 +64,64 @@ class CryptoPriceBot:
                 }
             }
         except Exception as e:
-            logger.error(f"Crypto error: {e}")
+            logger.error(f"Crypto API error: {e}")
             return None
 
-    # ===================== VÀNG VN 4 NGUỒN =====================
-    def get_all_vn_gold_prices(self):
+    # ===================== SJC VÀNG VN =====================
+    def get_sjc_prices(self):
+        """Lấy giá SJC - trả về LƯỢNG + CHỈ"""
+        try:
+            url = "https://giavangonline.com/data/gia-vang/"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(url, headers=headers, timeout=8)
+            response.raise_for_status()
+            html = response.text
 
-        headers = {"User-Agent": "Mozilla/5.0"}
-        sources = {}
+            buy_match = re.search(r'SJC.*?mua.*?(\d{7,8})', html)
+            sell_match = re.search(r'SJC.*?bán.*?(\d{7,8})', html)
 
-        sites = {
-            "PNJ": "https://www.pnj.com.vn/site/gia-vang",
-            "DOJI": "https://giavang.doji.vn/",
-            "PHU_QUY": "https://phuquygroup.vn/",
-            "BTMC": "https://btmc.vn/"
-        }
+            if buy_match and sell_match:
+                buy_luong = int(buy_match.group(1))
+                sell_luong = int(sell_match.group(1))
 
-        for name, url in sites.items():
-            try:
-                r = requests.get(url, headers=headers, timeout=10)
-                soup = BeautifulSoup(r.text, "html.parser")
-                text = soup.get_text()
+                buy_chi = buy_luong / 10
+                sell_chi = sell_luong / 10
 
-                match = re.search(
-                    r"SJC.*?(\d{2,3}[.,]\d{3}[.,]\d{3}).*?(\d{2,3}[.,]\d{3}[.,]\d{3})",
-                    text
-                )
+                return {
+                    "SJC_LUONG_BUY": buy_luong,
+                    "SJC_LUONG_SELL": sell_luong,
+                    "SJC_CHI_BUY": buy_chi,
+                    "SJC_CHI_SELL": sell_chi,
+                    "source": "giavangonline"
+                }
 
-                if match:
-                    buy = int(match.group(1).replace(".", "").replace(",", ""))
-                    sell = int(match.group(2).replace(".", "").replace(",", ""))
-                    sources[name] = {"buy": buy, "sell": sell}
+        except Exception as e:
+            logger.error(f"SJC API error: {e}")
 
-            except Exception as e:
-                logger.warning(f"{name} failed: {e}")
-                continue
+        return None
 
-        if not sources:
-            return None
+    # ===================== WORLD METALS =====================
+    def get_world_metals(self):
+        try:
+            url = "https://metals-api.com/api/latest?access_key=demo&base=USD&symbols=XAU,XAG"
+            response = requests.get(url, timeout=8)
+            response.raise_for_status()
+            data = response.json()
 
-        best_buy = min(sources.items(), key=lambda x: x[1]["buy"])
-        best_sell = max(sources.items(), key=lambda x: x[1]["sell"])
+            return {
+                'XAU': data['rates']['XAU'],
+                'XAG': data['rates']['XAG']
+            }
+        except:
+            return {'XAU': 2050.0, 'XAG': 24.5}
 
-        return {
-            "sources": sources,
-            "best_buy": best_buy[0],
-            "best_sell": best_sell[0]
-        }
+    def get_metal_prices(self):
+        sjc = self.get_sjc_prices() or {}
+        world = self.get_world_metals() or {}
+        return {**sjc, **world}
 
     # ===================== UI =====================
-    def create_main_menu(self, crypto):
+    def create_main_menu(self, crypto, metals):
         keyboard = []
 
         if crypto:
@@ -126,58 +133,76 @@ class CryptoPriceBot:
                 InlineKeyboardButton(f"🟡 BNB ${crypto['BNB']['usd']:,.0f}", callback_data='detail_BNB')
             ])
 
+        sjc_price = f"{metals.get('SJC_LUONG_BUY', 0):,.0f}đ" if metals.get('SJC_LUONG_BUY') else "❌"
+
         keyboard.append([
-            InlineKeyboardButton("🥇 So sánh SJC 4 nguồn", callback_data='detail_SJC')
+            InlineKeyboardButton(f"🥇 SJC {sjc_price}", callback_data='detail_SJC')
         ])
 
         keyboard.append([
-            InlineKeyboardButton("🔄 Refresh", callback_data='refresh')
+            InlineKeyboardButton(f"👑 XAU ${metals.get('XAU', 0):,.0f}", callback_data='detail_XAU'),
+            InlineKeyboardButton(f"🥈 XAG ${metals.get('XAG', 0):,.2f}", callback_data='detail_XAG')
+        ])
+
+        keyboard.append([
+            InlineKeyboardButton("🔄 Refresh", callback_data='refresh'),
+            InlineKeyboardButton("ℹ️ Status", callback_data='status')
         ])
 
         return InlineKeyboardMarkup(keyboard)
 
-    def format_main_message(self, crypto):
+    def format_main_message(self, crypto, metals):
         timestamp = datetime.now().strftime('%H:%M %d/%m')
         msg = f"💰 **THỊ TRƯỜNG {timestamp}** 💰\n\n"
 
         if crypto:
-            change = "🟢" if crypto['BTC']['change'] > 0 else "🔴"
-            msg += f"🟠 BTC ${crypto['BTC']['usd']:,.0f} {change}\n"
-            msg += f"🔷 ETH ${crypto['ETH']['usd']:,.0f}\n"
-            msg += f"🟡 BNB ${crypto['BNB']['usd']:,.0f}\n\n"
+            change_btc = "🟢" if crypto['BTC']['change'] > 0 else "🔴"
+            msg += f"🟠 `BTC`  ${crypto['BTC']['usd']:>8,.0f} {change_btc}\n"
+            msg += f"🔷 `ETH`  ${crypto['ETH']['usd']:>8,.0f}\n"
+            msg += f"🟡 `BNB`  ${crypto['BNB']['usd']:>8,.0f}\n\n"
 
-        msg += "👇 Bấm để xem chi tiết vàng VN"
+        if metals.get('SJC_LUONG_BUY', 0) > 50000000:
+            msg += f"🥇 `SJC/Lượng` {metals['SJC_LUONG_BUY']:>9,.0f}đ\n"
+            msg += f"   `SJC/Chỉ`   {metals['SJC_CHI_BUY']:>9,.0f}đ\n\n"
+        else:
+            msg += "🥇 `SJC` ❌ Lỗi API\n\n"
 
+        msg += f"👑 `XAU` ${metals.get('XAU', 0):,.1f}\n"
+        msg += f"🥈 `XAG` ${metals.get('XAG', 0):,.2f}\n"
+
+        msg += "\n👇 **Bấm để xem chi tiết**"
         return msg
 
-    def format_detail_message(self, crypto, item):
-
+    def format_detail_message(self, crypto, metals, item):
         key = item.split('_')[1]
 
-        if key == "SJC":
-            data = self.get_all_vn_gold_prices()
+        if key == 'SJC' and metals.get('SJC_LUONG_BUY', 0) > 50000000:
+            buy_l = metals['SJC_LUONG_BUY']
+            sell_l = metals['SJC_LUONG_SELL']
+            buy_c = metals['SJC_CHI_BUY']
+            sell_c = metals['SJC_CHI_SELL']
 
-            if not data:
-                return "❌ Không lấy được dữ liệu vàng"
+            diff_l = sell_l - buy_l
+            percent_l = (diff_l / buy_l) * 100
 
-            msg = "🥇 **SO SÁNH GIÁ SJC (1 LƯỢNG)**\n\n"
+            diff_c = sell_c - buy_c
+            percent_c = (diff_c / buy_c) * 100
 
-            for name, price in data["sources"].items():
-                diff = price["sell"] - price["buy"]
-                percent = diff / price["buy"] * 100
+            return f"""🥇 **VÀNG SJC**
 
-                msg += f"""🏷 {name}
-MUA:  {price['buy']:,.0f}đ
-BÁN: {price['sell']:,.0f}đ
-CHÊNH: {diff:,.0f}đ ({percent:.2f}%)
+📌 ----- 1 LƯỢNG -----
+💰 MUA:  {buy_l:,.0f}đ
+💎 BÁN: {sell_l:,.0f}đ
+🔺 CHÊNH: {diff_l:,.0f}đ ({percent_l:.2f}%)
 
-"""
+📌 ----- 1 CHỈ -----
+💰 MUA:  {buy_c:,.0f}đ
+💎 BÁN: {sell_c:,.0f}đ
+🔺 CHÊNH: {diff_c:,.0f}đ ({percent_c:.2f}%)
 
-            msg += f"🟢 MUA RẺ NHẤT: {data['best_buy']}\n"
-            msg += f"🔴 BÁN CAO NHẤT: {data['best_sell']}\n"
-            msg += f"\n🔄 {datetime.now().strftime('%H:%M:%S')}"
+🔄 {datetime.now().strftime('%H:%M:%S')}
 
-            return msg
+👆 **MAIN MENU**"""
 
         return "❌ Lỗi dữ liệu"
 
@@ -192,8 +217,10 @@ CHÊNH: {diff:,.0f}đ ({percent:.2f}%)
 
     async def show_main_menu(self, message_or_query):
         crypto = self.get_crypto_prices()
-        msg = self.format_main_message(crypto)
-        keyboard = self.create_main_menu(crypto)
+        metals = self.get_metal_prices()
+
+        msg = self.format_main_message(crypto, metals)
+        keyboard = self.create_main_menu(crypto, metals)
 
         if hasattr(message_or_query, 'reply_text'):
             await message_or_query.reply_text(msg, parse_mode='Markdown', reply_markup=keyboard)
@@ -205,11 +232,12 @@ CHÊNH: {diff:,.0f}đ ({percent:.2f}%)
         await query.answer()
 
         crypto = self.get_crypto_prices()
+        metals = self.get_metal_prices()
 
         if query.data in ['refresh', 'main_menu']:
             await self.show_main_menu(query)
         else:
-            detail_msg = self.format_detail_message(crypto, query.data)
+            detail_msg = self.format_detail_message(crypto, metals, query.data)
             await query.edit_message_text(detail_msg, parse_mode='Markdown', reply_markup=self.create_back_keyboard())
 
     def setup_handlers(self):
