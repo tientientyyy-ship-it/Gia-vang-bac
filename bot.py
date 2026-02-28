@@ -7,12 +7,10 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from dotenv import load_dotenv
 
-# Load env + DEBUG
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-print(f"🚀 TOKEN: {'OK' if TELEGRAM_TOKEN else '❌ MISSING!'}")
+print(f"🚀 TOKEN STATUS: {'OK' if TELEGRAM_TOKEN else 'MISSING!!!'}")
 
-# Logging cho Railway
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -37,9 +35,8 @@ class PriceBot:
 📈 24h: {change} `{coin['usd_24h_change']:+.1f}%`
 
 🕐 {datetime.now().strftime('%H:%M %d/%m')}"""
-        except Exception as e:
-            logger.error(f"Crypto {name} error: {e}")
-            return f"❌ Lỗi {name}"
+        except:
+            return f"❌ {name} error"
     
     def get_gold(self):
         try:
@@ -54,8 +51,7 @@ class PriceBot:
 
 🕐 {datetime.now().strftime('%H:%M %d/%m')}"""
         except:
-            return """🥇 **VÀNG SJC**
-🔄 Đang cập nhật..."""
+            return "🥇 **VÀNG** 🔄 Loading..."
     
     def get_silver(self):
         try:
@@ -68,7 +64,7 @@ class PriceBot:
 
 🕐 {datetime.now().strftime('%H:%M %d/%m')}"""
         except:
-            return "🥈 **BẠC** 🔄 Đang cập nhật..."
+            return "🥈 **BẠC** 🔄 Loading..."
     
     def menu(self):
         return InlineKeyboardMarkup([
@@ -79,9 +75,8 @@ class PriceBot:
         ])
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        logger.info("User started bot")
         await update.message.reply_text(
-            "🚀 **GIÁ VÀNG + CRYPTO**\n\n👇 Chọn giá:",
+            "🚀 **GIÁ VÀNG + CRYPTO BOT**\n\n👇 Chọn giá:",
             reply_markup=self.menu(),
             parse_mode='Markdown'
         )
@@ -99,19 +94,14 @@ class PriceBot:
         elif 'bnb' in text:
             await update.message.reply_text(self.get_crypto('binancecoin', 'BNB'), parse_mode='Markdown', reply_markup=self.menu())
         else:
-            await update.message.reply_text(
-                "🔍 **Gõ:** `vàng` `btc` `eth` `bnb` `bạc`\n\nHoặc nhấn 👇",
-                reply_markup=self.menu(),
-                parse_mode='Markdown'
-            )
+            await update.message.reply_text("🔍 Gõ: `vàng btc eth bnb bạc`", parse_mode='Markdown', reply_markup=self.menu())
     
     async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
         
-        text = ""
         if query.data == "menu":
-            text = "📊 **MENU GIÁ**\n👇 Chọn:"
+            text = "📊 **MENU GIÁ**"
         elif query.data == "btc":
             text = self.get_crypto('bitcoin', 'BTC')
         elif query.data == "eth":
@@ -122,30 +112,24 @@ class PriceBot:
             text = self.get_gold()
         elif query.data == "silver":
             text = self.get_silver()
+        else:
+            text = "❓ Unknown"
         
         await query.edit_message_text(text, reply_markup=self.menu(), parse_mode='Markdown')
     
-    def setup(self, app):
-        app.add_handler(CommandHandler("start", self.start))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text_msg))
-        app.add_handler(CallbackQueryHandler(self.button))
-    
-    async def run_bot(self):
+    async def run(self):
         if not TELEGRAM_TOKEN:
-            logger.error("❌ TELEGRAM_BOT_TOKEN missing in env!")
+            print("❌ TELEGRAM_BOT_TOKEN missing!")
             return
         
         self.app = Application.builder().token(TELEGRAM_TOKEN).build()
-        self.setup(self.app)
+        self.app.add_handler(CommandHandler("start", self.start))
+        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text_msg))
+        self.app.add_handler(CallbackQueryHandler(self.button))
         
-        logger.info("🤖 Bot starting on Railway...")
-        print("🚀 Bot live 24/24!")
+        print("🚀 Bot starting...")
         await self.app.run_polling(drop_pending_updates=True)
 
-# RAILWAY READY
-async def main():
-    bot = PriceBot()
-    await bot.run_bot()
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    bot = PriceBot()
+    asyncio.run(bot.run())
