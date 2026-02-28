@@ -71,22 +71,22 @@ class CryptoPriceBot:
         apis = [
             # API 1: Giavangonline - 99% uptime
             {
-                'url': 'https://phuquygroup.vn/',
+                'url': 'https://giavangonline.com/data/gia-vang/',
                 'parse': lambda data: self._parse_giavangonline(data)
             },
             # API 2: PNJ Official
             {
-                'url': 'https://btmc.vn/',
+                'url': 'https://gold.pnj.com.vn/api/price',
                 'parse': lambda data: self._parse_pnj(data)
             },
             # API 3: DOJI - Luôn ổn
             {
-                'url': 'https://giavang.doji.vn/',
+                'url': 'https://doji.vn/service/gold-price',
                 'parse': lambda data: self._parse_doji(data)
             },
             # API 4: SJC Live backup
             {
-                'url': 'https://www.pnj.com.vn/site/gia-vang?srsltid=AfmBOopUnsYRQdBSFHbL4FpScP6EpQk-O5mg6RKmSc0eXJy7M1xPhu_K',
+                'url': 'https://sjc.vn/ajaxhandler.ashx?q=',
                 'parse': lambda data: self._parse_sjc_live(data)
             }
         ]
